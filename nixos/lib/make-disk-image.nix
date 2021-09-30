@@ -320,8 +320,11 @@ let format' = format; in let
     ''}
 
     echo "copying staging root to image..."
+    echo "cptofs -p ${optionalString (partitionTableType != "none") "-P ${rootPartition}"} -t ${fsType} -i $diskImage $root/* / || (echo >&2 "ERROR: cptofs failed. diskSize might be too small for closure."; exit 1)"
+
     cptofs -p ${optionalString (partitionTableType != "none") "-P ${rootPartition}"} -t ${fsType} -i $diskImage $root/* / ||
       (echo >&2 "ERROR: cptofs failed. diskSize might be too small for closure."; exit 1)
+    echo "Done copying"
   '';
 in pkgs.vmTools.runInLinuxVM (
   pkgs.runCommand name
@@ -331,10 +334,13 @@ in pkgs.vmTools.runInLinuxVM (
         ${if format == "raw" then ''
           mv $diskImage $out/${filename}
         '' else ''
+          echo "${pkgs.qemu}/bin/qemu-img convert -f raw -O ${format} ${compress} $diskImage $out/${filename}"
           ${pkgs.qemu}/bin/qemu-img convert -f raw -O ${format} ${compress} $diskImage $out/${filename}
+          echo "Done conversion"
         ''}
         diskImage=$out/${filename}
         ${postVM}
+        echo "done post"
       '';
       memSize = 1024;
     }
@@ -343,12 +349,16 @@ in pkgs.vmTools.runInLinuxVM (
 
       rootDisk=${if partitionTableType != "none" then "/dev/vda${rootPartition}" else "/dev/vda"}
 
+      echo "1"
+
       # Some tools assume these exist
       ln -s vda /dev/xvda
       ln -s vda /dev/sda
       # make systemd-boot find ESP without udev
       mkdir /dev/block
       ln -s /dev/vda1 /dev/block/254:1
+
+      echo "2"
 
       mountPoint=/mnt
       mkdir $mountPoint
@@ -362,6 +372,8 @@ in pkgs.vmTools.runInLinuxVM (
         mount /dev/vda1 /mnt/boot
       ''}
 
+      echo "3"
+
       # Install a configuration.nix
       mkdir -p /mnt/etc/nixos
       ${optionalString (configFile != null) ''
@@ -370,6 +382,7 @@ in pkgs.vmTools.runInLinuxVM (
 
       # Set up core system link, GRUB, etc.
       NIXOS_INSTALL_BOOTLOADER=1 nixos-enter --root $mountPoint -- /nix/var/nix/profiles/system/bin/switch-to-configuration boot
+      echo "4"
 
       # The above scripts will generate a random machine-id and we don't want to bake a single ID into all our images
       rm -f $mountPoint/etc/machine-id
@@ -388,6 +401,7 @@ in pkgs.vmTools.runInLinuxVM (
           nixos-enter --root $mountPoint -- chown -R "$user:$group" "$target"
         fi
       done
+      echo "5"
 
       umount -R /mnt
 
